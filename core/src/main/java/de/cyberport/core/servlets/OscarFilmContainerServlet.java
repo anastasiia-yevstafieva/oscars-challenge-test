@@ -1,6 +1,13 @@
 package de.cyberport.core.servlets;
 
 import javax.servlet.Servlet;
+
+import com.google.gson.Gson;
+import de.cyberport.core.dto.Film;
+import de.cyberport.core.dto.SearchDTO;
+import de.cyberport.core.dto.SearchResult;
+import de.cyberport.core.services.SearchManagerService;
+import de.cyberport.core.utils.Utils;
 import org.apache.sling.api.SlingHttpServletRequest;
 import org.apache.sling.api.SlingHttpServletResponse;
 import org.apache.sling.api.resource.Resource;
@@ -8,7 +15,12 @@ import org.apache.sling.api.servlets.HttpConstants;
 import org.apache.sling.api.servlets.SlingSafeMethodsServlet;
 import org.apache.sling.servlets.annotations.SlingServletResourceTypes;
 import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.propertytypes.ServiceDescription;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Servlet that writes information about the Oscar films in json format into the response.
@@ -112,19 +124,39 @@ public class OscarFilmContainerServlet extends SlingSafeMethodsServlet {
 
     private static final long serialVersionUID = 1L;
 
+    @Reference
+    private SearchManagerService searchManagerService;
+
     @Override
-    public void doGet(final SlingHttpServletRequest req, final SlingHttpServletResponse resp) {
-        //TODO: remove this method call once your check is finished
-        printEntries(req);
+    public void doGet(final SlingHttpServletRequest req, final SlingHttpServletResponse resp) throws IOException {
+        resp.setContentType("application/json");
 
-        //TODO implement me
-    }
+        String jsonStr = new Gson().toJson(processRequest(req));
 
-    //TODO: remove this method once your check is finished
-    private void printEntries(SlingHttpServletRequest req) {
-        final Resource resource = req.getResource();
-        for (Resource child : resource.getChildren()) {
-            System.out.println("Entry: " + child.getValueMap());
+        try {
+            resp.getWriter().print(jsonStr);
+        } catch (IOException e) {
+            throw e;
         }
     }
+
+    private SearchResult processRequest(SlingHttpServletRequest req) {
+
+        final Resource rootResource = req.getResource();
+        List<Film> fullFilmList = Utils.parseRootResourcetoFilmsCollection(rootResource);
+
+        SearchDTO searchDTO = Utils.createSearchDTO(req);
+
+        List<Film> result = fullFilmList.stream()
+                .filter(film -> searchManagerService.isFilmMatchedToSearchParams(film, searchDTO))
+                .sorted(searchManagerService.getFilmComparator(searchDTO.getSortBy())).collect(Collectors.toList());
+
+        List<Film> limitedResult = result;
+        if (searchDTO.getLimit() != null) {
+            limitedResult = result.stream().limit(searchDTO.getLimit()).collect(Collectors.toList());
+        }
+
+        return new SearchResult(limitedResult);
+    }
+
 }
